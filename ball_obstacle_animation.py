@@ -20,15 +20,35 @@ def setup_scene():
     bpy.context.scene.frame_end = 120
     bpy.context.scene.frame_set(1)
     
-    # Add basic lighting
+    # Add basic lighting - BRIGHTER!
     bpy.ops.object.light_add(type='SUN', location=(5, 5, 10))
     sun = bpy.context.active_object
-    sun.data.energy = 3.0
+    sun.data.energy = 5.0  # Increased from 3.0
+    sun.rotation_euler = (math.radians(45), 0, math.radians(45))
     
     bpy.ops.object.light_add(type='AREA', location=(-5, -5, 5))
     area = bpy.context.active_object
-    area.data.energy = 2.0
+    area.data.energy = 3.0  # Increased from 2.0
     area.data.size = 5.0
+    
+    # Add more lights untuk ball
+    bpy.ops.object.light_add(type='POINT', location=(-8, 0, 5))
+    point = bpy.context.active_object
+    point.data.energy = 500.0  # Strong point light di ball
+    
+    bpy.ops.object.light_add(type='AREA', location=(0, -5, 5))
+    area2 = bpy.context.active_object
+    area2.data.energy = 2.0
+    area2.data.size = 3.0
+    
+    # Set world background untuk ambient light
+    world = bpy.context.scene.world
+    if world:
+        world.use_nodes = True
+        bg = world.node_tree.nodes.get('Background')
+        if bg:
+            bg.inputs['Color'].default_value = (0.5, 0.5, 0.5, 1.0)  # Gray ambient
+            bg.inputs['Strength'].default_value = 0.3  # Subtle ambient light
 
 def create_material(name, color, roughness=0.5, metallic=0.0):
     """Create a basic material with specified properties"""
@@ -41,6 +61,50 @@ def create_material(name, color, roughness=0.5, metallic=0.0):
         bsdf.inputs['Base Color'].default_value = color
         bsdf.inputs['Roughness'].default_value = roughness
         bsdf.inputs['Metallic'].default_value = metallic
+    
+    return mat
+
+def create_striped_material(name, color1, color2, scale=10.0):
+    """Create a material with procedural stripes (untuk ball yang menarik)"""
+    mat = bpy.data.materials.new(name=name)
+    mat.use_nodes = True
+    nodes = mat.node_tree.nodes
+    links = mat.node_tree.links
+    
+    # Clear default nodes
+    nodes.clear()
+    
+    # Create nodes
+    output = nodes.new(type='ShaderNodeOutputMaterial')
+    output.location = (400, 0)
+    
+    bsdf = nodes.new(type='ShaderNodeBsdfPrincipled')
+    bsdf.location = (200, 0)
+    bsdf.inputs['Roughness'].default_value = 0.2
+    bsdf.inputs['Metallic'].default_value = 0.3
+    
+    # Wave texture for stripes
+    wave = nodes.new(type='ShaderNodeTexWave')
+    wave.location = (-400, 0)
+    wave.wave_type = 'BANDS'
+    wave.inputs['Scale'].default_value = scale
+    wave.inputs['Distortion'].default_value = 0.0
+    
+    # Texture coordinate
+    tex_coord = nodes.new(type='ShaderNodeTexCoord')
+    tex_coord.location = (-600, 0)
+    
+    # Color ramp untuk definisi stripes
+    color_ramp = nodes.new(type='ShaderNodeValToRGB')
+    color_ramp.location = (-200, 0)
+    color_ramp.color_ramp.elements[0].color = color1
+    color_ramp.color_ramp.elements[1].color = color2
+    
+    # Connect
+    links.new(tex_coord.outputs['Generated'], wave.inputs['Vector'])
+    links.new(wave.outputs['Color'], color_ramp.inputs['Fac'])
+    links.new(color_ramp.outputs['Color'], bsdf.inputs['Base Color'])
+    links.new(bsdf.outputs['BSDF'], output.inputs['Surface'])
     
     return mat
 
@@ -73,7 +137,10 @@ def create_textured_material(name, image_path):
         print(f"Could not load image: {image_path}")
         # Create a procedural texture as fallback
         noise_tex = mat.node_tree.nodes.new(type='ShaderNodeTexNoise')
+        noise_tex.inputs['Scale'].default_value = 5.0
         mat.node_tree.links.new(noise_tex.outputs['Color'], bsdf.inputs['Base Color'])
+        # FIX: Connect BSDF to Output!
+        mat.node_tree.links.new(bsdf.outputs['BSDF'], output.inputs['Surface'])
         return mat
     
     # Connect nodes
@@ -91,11 +158,8 @@ def setup_ball_obstacle_scene():
     ground = bpy.context.active_object
     ground.name = "Ground"
     
-    # Create and apply ground material (could use texture)
-    try:
-        ground_mat = create_textured_material("GroundMaterial", "//concrete_texture.jpg")
-    except:
-        ground_mat = create_material("GroundMaterial", (0.3, 0.3, 0.3, 1.0), roughness=0.8)
+    # Create and apply ground material with nice color
+    ground_mat = create_material("GroundMaterial", (0.3, 0.35, 0.4, 1.0), roughness=0.8, metallic=0.0)
     apply_material(ground, ground_mat)
     
     # Create ball
@@ -103,12 +167,19 @@ def setup_ball_obstacle_scene():
     ball = bpy.context.active_object
     ball.name = "Ball"
     
-    # Create and apply ball material
-    try:
-        ball_mat = create_textured_material("BallMaterial", "//ball_texture.jpg")
-    except:
-        ball_mat = create_material("BallMaterial", (0.8, 0.2, 0.2, 1.0), roughness=0.2, metallic=0.1)
+    # Create and apply ball material - STRIPED PATTERN (seperti bola basket/soccer)
+    ball_mat = create_striped_material(
+        "BallMaterial", 
+        color1=(0.95, 0.1, 0.1, 1.0),  # Bright red
+        color2=(1.0, 1.0, 1.0, 1.0),   # White
+        scale=15.0
+    )
     apply_material(ball, ball_mat)
+    print(f"✅ Ball material applied: {ball_mat.name}")
+    print(f"   Ball has {len(ball.data.materials)} material(s)")
+    if len(ball.data.materials) > 0:
+        print(f"   Material name: {ball.data.materials[0].name}")
+        print(f"   Uses nodes: {ball.data.materials[0].use_nodes}")
     
     # Create obstacle (wall) - positioned so bottom sits on ground
     bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, 0))
@@ -117,11 +188,8 @@ def setup_ball_obstacle_scene():
     obstacle.scale = (2, 2, 4)  # Scale to make it a tall wall (height=4)
     obstacle.location.z = 2  # Move up so bottom sits on ground (half of scaled height = 4/2 = 2)
     
-    # Create and apply obstacle material
-    try:
-        obstacle_mat = create_textured_material("ObstacleMaterial", "//wall_texture.jpg")
-    except:
-        obstacle_mat = create_material("ObstacleMaterial", (0.2, 0.4, 0.8, 1.0), roughness=0.3, metallic=0.0)
+    # Create and apply obstacle material - BRIGHT BLUE
+    obstacle_mat = create_material("ObstacleMaterial", (0.1, 0.3, 0.9, 1.0), roughness=0.4, metallic=0.1)
     apply_material(obstacle, obstacle_mat)
     
     return ball, obstacle, ground

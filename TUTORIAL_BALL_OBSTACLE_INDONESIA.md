@@ -150,34 +150,80 @@ def setup_scene():
 - `frame_end = 120`: Total 120 frame (5 detik)
 - `frame_set(1)`: Reset timeline ke awal
 
-### Lighting Setup
+### Lighting Setup (UPDATE - BRIGHTER!)
 
 ```python
-    # Sun light (cahaya utama)
+    # Sun light (cahaya utama) - BRIGHTER!
     bpy.ops.object.light_add(type='SUN', location=(5, 5, 10))
     sun = bpy.context.active_object
-    sun.data.energy = 3.0
+    sun.data.energy = 5.0  # Increased from 3.0
+    sun.rotation_euler = (math.radians(45), 0, math.radians(45))
 ```
 
 **Sun Light:**
 - Type: Directional (parallel rays)
-- Energy: 3.0 (cukup terang)
+- Energy: **5.0** (lebih terang dari sebelumnya!)
+- Rotation: 45° untuk shadow yang lebih bagus
 - Location: Tidak penting (infinite distance)
 
 ```python
-    # Area light (fill light)
+    # Area light (fill light) - BRIGHTER!
     bpy.ops.object.light_add(type='AREA', location=(-5, -5, 5))
     area = bpy.context.active_object
-    area.data.energy = 2.0
+    area.data.energy = 3.0  # Increased from 2.0
     area.data.size = 5.0
 ```
 
 **Area Light:**
 - Type: Soft diffuse light
 - Size: 5.0 (area besar = cahaya lebih soft)
-- Energy: 2.0 (lebih redup dari sun)
+- Energy: **3.0** (lebih terang!)
 
-**Setup 2 Lampu:**
+**NEW - Additional Lights:**
+
+```python
+    # Point light di posisi ball untuk highlight
+    bpy.ops.object.light_add(type='POINT', location=(-8, 0, 5))
+    point = bpy.context.active_object
+    point.data.energy = 500.0  # Strong point light
+    
+    # Extra area light untuk obstacle
+    bpy.ops.object.light_add(type='AREA', location=(0, -5, 5))
+    area2 = bpy.context.active_object
+    area2.data.energy = 2.0
+    area2.data.size = 3.0
+```
+
+**Point Light:**
+- Energy: 500.0 (sangat terang!)
+- Location: Di posisi ball untuk highlight
+- Radius falloff otomatis
+
+**World Background (NEW):**
+
+```python
+    # Set world background untuk ambient light
+    world = bpy.context.scene.world
+    if world:
+        world.use_nodes = True
+        bg = world.node_tree.nodes.get('Background')
+        if bg:
+            bg.inputs['Color'].default_value = (0.5, 0.5, 0.5, 1.0)  # Gray ambient
+            bg.inputs['Strength'].default_value = 0.3  # Subtle ambient light
+```
+
+**World Ambient:**
+- Color: Gray (0.5, 0.5, 0.5) = neutral ambient
+- Strength: 0.3 = subtle fill light dari semua arah
+- Prevents pure black shadows
+
+**Total Lighting Setup:**
+- ✅ 1x Sun (main key light)
+- ✅ 2x Area (fill lights)
+- ✅ 1x Point (ball highlight)
+- ✅ World background (ambient)
+
+**Result:** Ball tidak akan hitam, semua objek terlihat jelas!
 - Sun: Main light (key light)
 - Area: Fill light (mengurangi shadow gelap)
 
@@ -217,7 +263,87 @@ def create_material(name, color, roughness=0.5, metallic=0.0):
   - 0.5 = Semi-metal
   - 1.0 = Metal murni (chrome, gold)
 
-### Material dengan Tekstur
+### Material dengan Tekstur (Update: Procedural Material)
+
+**⚠️ UPDATE:** Script sekarang menggunakan **procedural materials** (tidak perlu file texture) untuk menghindari masalah ball hitam!
+
+#### Material Striped Pattern (Untuk Ball)
+
+```python
+def create_striped_material(name, color1, color2, scale=10.0):
+    """Create a material with procedural stripes (untuk ball yang menarik)"""
+    mat = bpy.data.materials.new(name=name)
+    mat.use_nodes = True
+    nodes = mat.node_tree.nodes
+    links = mat.node_tree.links
+    
+    # Clear default nodes
+    nodes.clear()
+    
+    # Create nodes
+    output = nodes.new(type='ShaderNodeOutputMaterial')
+    output.location = (400, 0)
+    
+    bsdf = nodes.new(type='ShaderNodeBsdfPrincipled')
+    bsdf.location = (200, 0)
+    bsdf.inputs['Roughness'].default_value = 0.2
+    bsdf.inputs['Metallic'].default_value = 0.3
+    
+    # Wave texture for stripes
+    wave = nodes.new(type='ShaderNodeTexWave')
+    wave.location = (-400, 0)
+    wave.wave_type = 'BANDS'
+    wave.inputs['Scale'].default_value = scale
+    wave.inputs['Distortion'].default_value = 0.0
+    
+    # Texture coordinate
+    tex_coord = nodes.new(type='ShaderNodeTexCoord')
+    tex_coord.location = (-600, 0)
+    
+    # Color ramp untuk definisi stripes
+    color_ramp = nodes.new(type='ShaderNodeValToRGB')
+    color_ramp.location = (-200, 0)
+    color_ramp.color_ramp.elements[0].color = color1
+    color_ramp.color_ramp.elements[1].color = color2
+    
+    # Connect nodes
+    links.new(tex_coord.outputs['Generated'], wave.inputs['Vector'])
+    links.new(wave.outputs['Color'], color_ramp.inputs['Fac'])
+    links.new(color_ramp.outputs['Color'], bsdf.inputs['Base Color'])
+    links.new(bsdf.outputs['BSDF'], output.inputs['Surface'])
+    
+    return mat
+```
+
+**Node Graph untuk Striped Material:**
+```
+[TexCoord] → [Wave Texture] → [ColorRamp] → [BSDF] → [Output]
+   ↓            (BANDS)          (Red→White)   ↓
+Generated                                   Roughness: 0.2
+                                           Metallic: 0.3
+```
+
+**Penjelasan Nodes:**
+1. **Texture Coordinate** (`Generated`): Koordinat UV otomatis untuk sphere
+2. **Wave Texture** (`BANDS`): Membuat pola garis-garis (stripes)
+   - `Scale`: Mengatur jumlah stripes (15 = 15 garis)
+   - `Distortion`: 0 = garis lurus, >0 = garis bergelombang
+3. **ColorRamp**: Mengonversi grayscale ke 2 warna
+   - Element 0: Warna pertama (merah)
+   - Element 1: Warna kedua (putih)
+4. **Principled BSDF**: Shader utama
+   - `Roughness`: 0.2 (mengkilap)
+   - `Metallic`: 0.3 (sedikit metalik)
+5. **Output**: Koneksi ke surface material
+
+**Keuntungan Procedural Material:**
+✅ Tidak perlu file texture eksternal  
+✅ Selalu work (tidak ada error "file not found")  
+✅ Mudah di-customize (ganti warna, scale)  
+✅ Render cepat  
+✅ Tidak ada masalah ball hitam!
+
+#### Material dengan Tekstur Image (Optional - Advanced)
 
 ```python
 def create_textured_material(name, image_path):
@@ -249,15 +375,19 @@ Kita membuat node graph untuk tekstur:
         image_tex.image = image
     except:
         print(f"Could not load image: {image_path}")
-        # Fallback: Use procedural noise
+        # Fallback: Use procedural noise texture
         noise_tex = mat.node_tree.nodes.new(type='ShaderNodeTexNoise')
+        noise_tex.inputs['Scale'].default_value = 5.0
         mat.node_tree.links.new(noise_tex.outputs['Color'], bsdf.inputs['Base Color'])
+        # ⚠️ PENTING: Connect BSDF to Output (fix ball hitam!)
+        mat.node_tree.links.new(bsdf.outputs['BSDF'], output.inputs['Surface'])
         return mat
 ```
 
 **Try-Except Block:**
 - `try`: Coba load gambar dari file
 - `except`: Jika gagal, gunakan noise texture sebagai fallback
+- **FIX:** Sekarang fallback **tersambung dengan benar** ke Output (tidak hitam lagi!)
 
 **Image Path:**
 - `"//concrete_texture.jpg"`: Relative path (dalam folder .blend)
@@ -301,15 +431,15 @@ def setup_ball_obstacle_scene():
 
 **Material Ground:**
 ```python
-    try:
-        ground_mat = create_textured_material("GroundMaterial", "//concrete_texture.jpg")
-    except:
-        ground_mat = create_material("GroundMaterial", (0.3, 0.3, 0.3, 1.0), roughness=0.8)
+    # Create and apply ground material with nice color
+    ground_mat = create_material("GroundMaterial", (0.3, 0.35, 0.4, 1.0), roughness=0.8, metallic=0.0)
     apply_material(ground, ground_mat)
 ```
 
-- Warna: Abu-abu (0.3, 0.3, 0.3)
-- Roughness: 0.8 (cukup kasar)
+**UPDATE:** Tidak pakai texture lagi, langsung solid color:
+- Color: `(0.3, 0.35, 0.4, 1.0)` = Abu-abu kebiruan
+- Roughness: `0.8` = Agak matte (seperti concrete)
+- Metallic: `0.0` = Non-metal
 
 ### Ball (Bola)
 
@@ -320,46 +450,87 @@ def setup_ball_obstacle_scene():
     ball.name = "Ball"
 ```
 
-**UV Sphere:**
-- `radius=1`: Diameter 2 unit
-- `location=(-8, 0, 1)`:
-  - X = -8: Jauh di kiri
+**Properti Ball:**
+- Type: UV Sphere (smooth sphere dengan UV coordinates)
+- Radius: 1 unit
+- Location: (-8, 0, 1)
+  - X = -8: Mulai dari kiri
   - Y = 0: Center
-  - Z = 1: Radius di atas ground (bottom touches ground)
+  - Z = 1: Radius ball di atas ground
 
-**Perhitungan Z:**
-```
-Radius = 1
-Bottom of sphere = Center Z - Radius
-1 - 1 = 0 (touches ground) ✅
-```
-
-**Material Ball:**
+**Material Ball - STRIPED PATTERN:**
 ```python
-    try:
-        ball_mat = create_textured_material("BallMaterial", "//ball_texture.jpg")
-    except:
-        ball_mat = create_material("BallMaterial", (0.8, 0.2, 0.2, 1.0), 
-                                   roughness=0.2, metallic=0.1)
+    # Create and apply ball material - STRIPED PATTERN (seperti bola basket/soccer)
+    ball_mat = create_striped_material(
+        "BallMaterial", 
+        color1=(0.95, 0.1, 0.1, 1.0),  # Bright red
+        color2=(1.0, 1.0, 1.0, 1.0),   # White
+        scale=15.0
+    )
     apply_material(ball, ball_mat)
+    print(f"✅ Ball material applied: {ball_mat.name}")
+    print(f"   Ball has {len(ball.data.materials)} material(s)")
+    if len(ball.data.materials) > 0:
+        print(f"   Material name: {ball.data.materials[0].name}")
+        print(f"   Uses nodes: {ball.data.materials[0].use_nodes}")
 ```
 
-- Warna: Merah cerah (0.8, 0.2, 0.2)
-- Roughness: 0.2 (mengkilap seperti bola basket)
-- Metallic: 0.1 (sedikit efek metalik)
+**UPDATE - Procedural Stripes:**
+- **color1**: `(0.95, 0.1, 0.1, 1.0)` = Merah cerah
+- **color2**: `(1.0, 1.0, 1.0, 1.0)` = Putih
+- **scale**: `15.0` = 15 garis stripes
+- **Pattern**: Merah-putih seperti bola basket! 🏀
+
+**Debug Print:**
+- Print informasi material untuk troubleshooting
+- Memastikan material ter-apply dengan benar
+- Uses nodes: harus `True`
 
 ### Obstacle (Dinding)
 
 ```python
-    # Create obstacle (wall)
+    # Create obstacle (wall) - positioned so bottom sits on ground
     bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, 0))
     obstacle = bpy.context.active_object
     obstacle.name = "Obstacle"
-    obstacle.scale = (2, 2, 4)  # Lebar, Dalam, Tinggi
-    obstacle.location.z = 2  # Half of scaled height
+    obstacle.scale = (2, 2, 4)  # Scale to make it a tall wall (height=4)
+    obstacle.location.z = 2  # Move up so bottom sits on ground (half of scaled height = 4/2 = 2)
 ```
 
-**Perhitungan Posisi Z:**
+**Scaling Logic:**
+1. Create cube size 1 at origin
+2. Scale: (2, 2, 4)
+   - X (width): 2 units
+   - Y (depth): 2 units  
+   - Z (height): 4 units
+3. Move up: Z = 2 (half of height)
+   - Bottom sits exactly on ground (Z = 0)
+   - Top reaches Z = 4
+
+**Material Obstacle:**
+```python
+    # Create and apply obstacle material - BRIGHT BLUE
+    obstacle_mat = create_material("ObstacleMaterial", (0.1, 0.3, 0.9, 1.0), roughness=0.4, metallic=0.1)
+    apply_material(obstacle, obstacle_mat)
+```
+
+**UPDATE:** Biru lebih cerah:
+- Color: `(0.1, 0.3, 0.9, 1.0)` = Biru bright
+- Roughness: `0.4` = Agak glossy
+- Metallic: `0.1` = Sedikit shine
+
+**Return Value:**
+```python
+    return ball, obstacle, ground
+```
+
+Fungsi mengembalikan ketiga objek untuk digunakan di setup physics.
+
+---
+
+## Langkah 5: Setup Rigid Body Physics
+
+### Ball Physics (ACTIVE)
 ```
 Scale Z = 4 (tinggi dinding)
 Center harus di: 4 / 2 = 2
@@ -1093,6 +1264,228 @@ rigidbody_world.solver_iterations = 20
 obj.rigid_body.use_deactivation = True
 obj.rigid_body.deactivate_linear_velocity = 0.4
 obj.rigid_body.deactivate_angular_velocity = 0.5
+```
+
+---
+
+## Troubleshooting: Ball Hitam / Material Tidak Muncul
+
+### Problem: Ball Muncul Hitam (No Color)
+
+**Gejala:**
+- Ball terlihat hitam sepenuhnya
+- Tidak ada stripes merah-putih yang diharapkan
+- Material seperti tidak ter-apply
+
+**Penyebab Umum:**
+
+#### 1. Viewport Shading Mode Salah ⚠️
+
+**Check:** Tekan `Z` di viewport, pilih mode yang benar
+
+```
+❌ Solid View        → Material TIDAK tampil
+✅ Material Preview  → Material tampil (EEVEE preview)
+✅ Rendered          → Material tampil (Cycles/EEVEE full)
+```
+
+**Solusi:**
+```
+1. Tekan 'Z' di 3D Viewport
+2. Pilih "Material Preview" (bola dengan checkerboard)
+3. Atau pilih "Rendered" (bola solid putih)
+```
+
+#### 2. Shader Nodes Tidak Tersambung
+
+**Check:** Buka Shader Editor, select ball, lihat node graph
+
+```
+❌ BAD:  [BSDF] ... [Output]  → Tidak tersambung, ball hitam!
+✅ GOOD: [BSDF] → [Output]     → Tersambung, ball berwarna
+```
+
+**Solusi:**
+```python
+# Pastikan ada koneksi BSDF → Output
+mat.node_tree.links.new(bsdf.outputs['BSDF'], output.inputs['Surface'])
+```
+
+**Manual Fix di Blender:**
+1. Select ball
+2. Buka Shader Editor (Shift+F3)
+3. Drag dari `BSDF` socket "BSDF" ke `Material Output` socket "Surface"
+
+#### 3. Material Tidak Ter-Apply
+
+**Check:** Select ball, lihat Properties > Material Properties
+
+```
+❌ No material slots         → Material belum di-add
+✅ "BallMaterial" terpilih   → Material sudah ter-apply
+```
+
+**Solusi:**
+```python
+# Check console output:
+print(f"Ball materials: {[m.name for m in ball.data.materials]}")
+# Harus print: ['BallMaterial']
+```
+
+**Manual Fix:**
+1. Select ball
+2. Properties > Material Properties (bola icon)
+3. Click "+" untuk add material slot
+4. Click "New" atau pilih existing material
+
+#### 4. Lighting Terlalu Gelap
+
+**Check:** Apakah ada cukup cahaya di scene?
+
+**Solusi:**
+```python
+# Add stronger lighting
+bpy.ops.object.light_add(type='POINT', location=(-8, 0, 5))
+point = bpy.context.active_object
+point.data.energy = 1000.0  # Very bright!
+```
+
+**Quick Test:**
+```python
+# Set world background terang
+world = bpy.context.scene.world
+world.node_tree.nodes['Background'].inputs['Strength'].default_value = 1.0
+world.node_tree.nodes['Background'].inputs['Color'].default_value = (1, 1, 1, 1)
+```
+
+#### 5. Render Engine Salah
+
+**Check:** Properties > Render Properties > Render Engine
+
+```
+❌ Workbench  → Tidak support material nodes
+✅ EEVEE      → Support material nodes (fast)
+✅ Cycles     → Support material nodes (quality)
+```
+
+**Solusi:**
+```python
+bpy.context.scene.render.engine = 'CYCLES'
+```
+
+### Debug Checklist ✅
+
+Jika ball masih hitam, cek satu per satu:
+
+```
+□ 1. Viewport shading = Material Preview atau Rendered?
+□ 2. Shader nodes tersambung (BSDF → Output)?
+□ 3. Material ter-apply di ball (cek Material Properties)?
+□ 4. Ada lighting di scene (minimal 1 lamp)?
+□ 5. World background tidak hitam total?
+□ 6. Render engine = Cycles atau EEVEE?
+□ 7. Console print "✅ Ball material applied"?
+```
+
+### Quick Fix Script
+
+Jika ball masih hitam, run script ini di Python Console:
+
+```python
+import bpy
+
+# Select ball
+ball = bpy.data.objects.get("Ball")
+if not ball:
+    print("❌ Ball not found!")
+else:
+    print(f"✅ Ball found: {ball.name}")
+    
+    # Check material
+    if len(ball.data.materials) == 0:
+        print("❌ No material on ball!")
+        # Apply simple red material
+        mat = bpy.data.materials.new("FixBallMat")
+        mat.use_nodes = True
+        bsdf = mat.node_tree.nodes.get('Principled BSDF')
+        bsdf.inputs['Base Color'].default_value = (1, 0, 0, 1)  # Pure red
+        ball.data.materials.append(mat)
+        print("✅ Applied red material to ball")
+    else:
+        mat = ball.data.materials[0]
+        print(f"✅ Material: {mat.name}")
+        print(f"   Uses nodes: {mat.use_nodes}")
+        
+        # Check nodes
+        if mat.use_nodes:
+            output = mat.node_tree.nodes.get('Material Output')
+            if output and output.inputs['Surface'].is_linked:
+                print("✅ BSDF connected to Output")
+            else:
+                print("❌ BSDF NOT connected to Output!")
+                
+# Check viewport shading
+area = bpy.context.area
+if area.type == 'VIEW_3D':
+    shading = area.spaces[0].shading
+    print(f"\nViewport shading: {shading.type}")
+    if shading.type == 'SOLID':
+        print("⚠️  Change to MATERIAL or RENDERED!")
+        shading.type = 'MATERIAL'
+        print("✅ Changed to MATERIAL preview")
+        
+# Check render engine
+print(f"\nRender engine: {bpy.context.scene.render.engine}")
+if bpy.context.scene.render.engine == 'BLENDER_WORKBENCH':
+    print("⚠️  Workbench doesn't support materials!")
+    bpy.context.scene.render.engine = 'CYCLES'
+    print("✅ Changed to CYCLES")
+```
+
+### Striped Material Not Showing?
+
+Jika solid color muncul tapi **stripes tidak terlihat**:
+
+```python
+# 1. Check scale
+ball_mat.node_tree.nodes['Wave Texture'].inputs['Scale'].default_value = 15.0
+
+# 2. Check wave type
+ball_mat.node_tree.nodes['Wave Texture'].wave_type = 'BANDS'
+
+# 3. Check connections
+# TexCoord → Wave → ColorRamp → BSDF → Output
+# Semua harus tersambung!
+```
+
+### Still Black? Ultimate Fix
+
+Jika semua sudah dicoba tapi ball masih hitam:
+
+```python
+import bpy
+
+# Nuclear option: Delete dan recreate ball dengan material baru
+old_ball = bpy.data.objects.get("Ball")
+if old_ball:
+    bpy.data.objects.remove(old_ball)
+
+# Create new ball
+bpy.ops.mesh.primitive_uv_sphere_add(radius=1, location=(-8, 0, 1))
+ball = bpy.context.active_object
+ball.name = "Ball"
+
+# Apply GUARANTEED working material (solid red)
+mat = bpy.data.materials.new("GuaranteedRed")
+mat.use_nodes = True
+bsdf = mat.node_tree.nodes.get('Principled BSDF')
+bsdf.inputs['Base Color'].default_value = (1.0, 0.0, 0.0, 1.0)  # PURE RED
+bsdf.inputs['Roughness'].default_value = 0.3
+bsdf.inputs['Metallic'].default_value = 0.5
+ball.data.materials.append(mat)
+
+print("✅ Ball recreated with guaranteed red material")
+print("If still black: CHECK VIEWPORT SHADING MODE!")
 ```
 
 ---
